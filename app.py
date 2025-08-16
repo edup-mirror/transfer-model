@@ -55,6 +55,16 @@ def fetch_sites():
     """
     return pd.read_sql(q, engine)
 
+@st.cache_data(ttl=30)
+def fetch_material_summary():
+    # Fetches the cleaned up view showing effects of material moves
+    q = """
+      select *
+      from rf_site_summary_display
+      order by "Facility", "Material Stream", "Load Name"
+    """
+    return pd.read_sql(q, engine)
+
 import sqlalchemy as sa
 import pandas as pd
 
@@ -109,10 +119,9 @@ st.title("Transfer Model")
 
 # KPIs (from views you created in DB)
 tot = fetch_totals()
-c1, c2, c3 = st.columns(3)
-c1.metric("Annual Loads (Δ)", f"{tot['current_loads_annual'][0]:,.2f}", f"{tot['delta_loads_annual'][0]:+.2f}")
-c2.metric("Annual Hours (Δ)", f"{tot['current_hours_annual'][0]:,.2f}", f"{tot['delta_hours_annual'][0]:+.2f}")
-c3.metric("Monthly Hours (Δ)", f"{tot['current_hours_monthly'][0]:,.2f}", f"{tot['delta_hours_monthly'][0]:+.2f}")
+c1, c2 = st.columns(2)
+c1.metric("Annual Transfer Hours (Δ)", f"{tot['current_hours_annual'][0]:,.2f}", f"{tot['delta_hours_annual'][0]:+.2f}", delta_color="inverse")
+c2.metric("Monthly Transfer Hours (Δ)", f"{tot['current_hours_monthly'][0]:,.2f}", f"{tot['delta_hours_monthly'][0]:+.2f}", delta_color="inverse")
 
 # Fetch sites data for use throughout the app
 sites = fetch_sites()
@@ -131,9 +140,12 @@ with left_col:
     from_label = left.selectbox("From site", sites["label"], key="from_site")
     to_label   = right.selectbox("To site",   sites["label"], key="to_site")
 
-    delta_mt = st.number_input("MT to move (annual)", min_value=0.0, step=10.0, value=0.0)
-
+    # Get the total MT for the selected "From" site to use as default
     from_key = sites.loc[sites["label"] == from_label, "site_key"].iat[0]
+    from_total_mt = sites.loc[sites["label"] == from_label, "mt_total"].iat[0]
+    
+    delta_mt = st.number_input("MT to move (annual)", min_value=0.0, step=10.0, value=float(from_total_mt))
+
     to_key   = sites.loc[sites["label"] == to_label,   "site_key"].iat[0]
 
     if st.button("Move material"):
@@ -227,6 +239,9 @@ with right_col:
         }
     ))
 
-# Read-only table below (nice for sanity)
-with st.expander("Site list"):
-    st.dataframe(sites[["name","address","row_count","lat","lon"]], use_container_width=True)
+# Material Summary Display - shows detailed effects of material moves
+st.subheader("Material Transfer Summary")
+st.write("This table shows the detailed effects of material moves on each facility, load, and material stream:")
+
+material_summary = fetch_material_summary()
+st.dataframe(material_summary, use_container_width=True, height=400)
